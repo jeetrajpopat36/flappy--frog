@@ -25,7 +25,7 @@ jobs:
       - name: Extract Android project
         run: |
           mkdir -p android-build
-          unzip -q FlappyFrog_Android_Foundation_v1.zip -d android-build
+          unzip -q FlappyFrog_Android_Foundation_v2.zip -d android-build
 
       - name: Build APK
         working-directory: android-build/FlappyFrogAndroid
