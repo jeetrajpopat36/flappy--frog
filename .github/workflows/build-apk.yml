@@ -36,4 +36,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Flappy-Frog-debug-APK
-          path: android-build/FlappyFrogAndroid/app/build/outputs/apk/debug/*.apk
+          path: android-build/FlappyFrog_Android_Foundation_v3/app/build/outputs/apk/debug/*.apk
