@@ -11,25 +11,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
       - name: Extract Android project
         run: |
           mkdir -p android-build
           unzip -q FlappyFrog_Android_Foundation_v1.zip -d android-build
 
-      - name: Find Android project
-        run: |
-          PROJECT_DIR=$(find android-build -name gradlew -type f -print -quit | xargs dirname)
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-      - name: Make Gradle executable
-        run: chmod +x "$PROJECT_DIR/gradlew"
-
-      - name: Build debug APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Build APK
+        working-directory: android-build/FlappyFrogAndroid
+        run: gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Flappy-Frog-debug-APK
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          path: android-build/FlappyFrogAndroid/app/build/outputs/apk/debug/*.apk
