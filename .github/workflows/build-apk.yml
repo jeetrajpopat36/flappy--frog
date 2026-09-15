@@ -32,6 +32,22 @@ jobs:
         working-directory: android-build/FlappyFrog_Android_Foundation_v3
         run: gradle assembleDebug --stacktrace
 
+      - name: Print APK certificate fingerprints
+        run: |
+          APK=$(find android-build/FlappyFrog_Android_Foundation_v3/app/build/outputs/apk/debug -name "*.apk" -type f | head -n 1)
+
+          echo "========================================"
+          echo "FLAPPY FROG APK CERTIFICATE"
+          echo "========================================"
+          echo "APK: $APK"
+          echo ""
+          echo "SHA-1:"
+          keytool -printcert -jarfile "$APK" | grep "SHA1:"
+          echo ""
+          echo "SHA-256:"
+          keytool -printcert -jarfile "$APK" | grep "SHA256:"
+          echo "========================================"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
