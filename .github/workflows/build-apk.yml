@@ -26,7 +26,7 @@ jobs:
         run: |
           rm -rf android-build
           mkdir -p android-build
-          unzip -q FlappyFrog_Android_Foundation_v3_READY.zip -d android-build
+          unzip -q FlappyFrog_Android_GoogleSignIn_V38_CORRECTED.zip -d android-build
 
       - name: Build APK
         working-directory: android-build/FlappyFrog_Android_Foundation_v3
