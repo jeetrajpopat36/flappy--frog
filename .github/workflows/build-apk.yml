@@ -28,23 +28,53 @@ jobs:
           mkdir -p android-build
           unzip -q FlappyFrog_FINAL_ANDROID_BROWSER_GOOGLE_REVIVE_FIXED.zip -d android-build
 
+      - name: Find Android Gradle project
+        run: |
+          echo "Searching for Gradle project..."
+
+          PROJECT_DIR=$(find android-build -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -print -quit | xargs dirname)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Could not find settings.gradle"
+            echo "Extracted files:"
+            find android-build -maxdepth 5 -type f | sort
+            exit 1
+          fi
+
+          echo "Gradle project found at:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
       - name: Show project files
         run: |
-          echo "Android project:"
-          find android-build -maxdepth 3 -type f | sort
+          echo "Project directory:"
+          echo "$PROJECT_DIR"
+
+          echo "Gradle files:"
+          find "$PROJECT_DIR" -maxdepth 3 -type f \
+            \( -name "settings.gradle*" -o -name "build.gradle*" \) \
+            -print
 
       - name: Build Debug APK
-        working-directory: android-build
         run: |
-          gradle assembleDebug --stacktrace
+          gradle -p "$PROJECT_DIR" assembleDebug --stacktrace
 
       - name: Find APK
         run: |
-          find android-build -type f -name "*.apk" -print
+          echo "===== APK FILES ====="
+          find "$PROJECT_DIR" -type f -name "*.apk" -print
 
       - name: Print APK SHA-1 and SHA-256
         run: |
-          APK=$(find android-build -type f -name "*.apk" | head -n 1)
+          APK=$(find "$PROJECT_DIR" -type f -name "*.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not created."
+            exit 1
+          fi
 
           echo "APK: $APK"
 
@@ -54,9 +84,9 @@ jobs:
           echo "===== SHA-256 ====="
           keytool -printcert -jarfile "$APK" | grep -i "SHA256"
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
+            - name: Upload APK
+              uses: actions/upload-artifact@v4
+              with:
           name: Flappy-Frog-FINAL-APK
           path: android-build/**/build/outputs/apk/**/*.apk
           if-no-files-found: error
