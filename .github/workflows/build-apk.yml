@@ -105,9 +105,12 @@ jobs:
           CERT_OUTPUT=$("$APKSIGNER" verify --print-certs "$APK")
           echo "$CERT_OUTPUT"
 
-          ACTUAL_SHA1=$(printf '%s\n' "$CERT_OUTPUT" | grep -i "SHA-1 digest:" | head -n 1 | sed 's/.*SHA-1 digest: //' | tr '[:lower:]' '[:upper:]')
+          # apksigner prints SHA-1 as 40 hex characters without colons.
+          # Normalize BOTH values before comparing so formatting can never cause a false failure.
+          ACTUAL_SHA1=$(printf '%s\n' "$CERT_OUTPUT" | grep -i "SHA-1 digest:" | head -n 1 | sed 's/.*SHA-1 digest: //' | tr -d ':' | tr '[:lower:]' '[:upper:]')
+          NORMALIZED_EXPECTED_SHA1=$(printf '%s' "$EXPECTED_SHA1" | tr -d ':' | tr '[:lower:]' '[:upper:]')
 
-          if [ "$ACTUAL_SHA1" != "$EXPECTED_SHA1" ]; then
+          if [ "$ACTUAL_SHA1" != "$NORMALIZED_EXPECTED_SHA1" ]; then
             echo "ERROR: APK SHA-1 does not match the permanent Flappy Frog signing certificate."
             echo "Expected: $EXPECTED_SHA1"
             echo "Actual:   $ACTUAL_SHA1"
