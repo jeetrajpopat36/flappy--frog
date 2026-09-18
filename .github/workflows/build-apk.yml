@@ -23,15 +23,26 @@ jobs:
           gradle-version: '8.13'
 
       - name: Extract Android project
+        env:
+          FLAPPY_KEYSTORE_BASE64: ${{ secrets.FLAPPY_KEYSTORE_BASE64 }}
         run: |
+          set -e
           rm -rf android-build
           mkdir -p android-build
-          unzip -q FlappyFrog_FINAL_ANDROID_BROWSER_GOOGLE_REVIVE_FIXED.zip -d android-build
+          unzip -q FlappyFrog_FIXED_SIGNING.zip -d android-build
+
+          if [ -z "$FLAPPY_KEYSTORE_BASE64" ]; then
+            echo "ERROR: FLAPPY_KEYSTORE_BASE64 GitHub secret is missing."
+            exit 1
+          fi
+
+          printf '%s' "$FLAPPY_KEYSTORE_BASE64" | base64 --decode > android-build/flappyfrog-signing.jks
+          test -s android-build/flappyfrog-signing.jks
+          echo "Fixed Flappy Frog signing keystore installed."
 
       - name: Find Android Gradle project
         run: |
           echo "Searching for Gradle project..."
-
           PROJECT_DIR=$(find android-build -type f \
             \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
             -print -quit | xargs dirname)
@@ -45,33 +56,66 @@ jobs:
 
           echo "Gradle project found at:"
           echo "$PROJECT_DIR"
-
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Show project files
         run: |
           echo "Project directory:"
           echo "$PROJECT_DIR"
-
           echo "Gradle files:"
           find "$PROJECT_DIR" -maxdepth 3 -type f \
             \( -name "settings.gradle*" -o -name "build.gradle*" \) \
             -print
 
-      - name: Build Debug APK
+      - name: Build Debug APK with fixed signing key
+        env:
+          FLAPPY_KEYSTORE_PATH: ${{ github.workspace }}/android-build/flappyfrog-signing.jks
+          FLAPPY_KEYSTORE_PASSWORD: ${{ secrets.FLAPPY_KEYSTORE_PASSWORD }}
+          FLAPPY_KEY_ALIAS: ${{ secrets.FLAPPY_KEY_ALIAS }}
+          FLAPPY_KEY_PASSWORD: ${{ secrets.FLAPPY_KEY_PASSWORD }}
         run: |
+          set -e
+
+          if [ -z "$FLAPPY_KEYSTORE_PASSWORD" ] || [ -z "$FLAPPY_KEY_ALIAS" ] || [ -z "$FLAPPY_KEY_PASSWORD" ]; then
+            echo "ERROR: One or more Flappy Frog signing secrets are missing."
+            exit 1
+          fi
+
           gradle -p "$PROJECT_DIR" assembleDebug --stacktrace
 
-      - name: Verify APK
+      - name: Verify APK and fixed SHA-1
+        env:
+          EXPECTED_SHA1: C8:21:F8:8B:20:CB:21:8B:BC:45:AE:AB:84:31:CD:22:49:74:DB:89
         run: |
-          echo "===== APK FILES ====="
+          set -e
 
           APK=$(find "$PROJECT_DIR" -type f -name "*.apk" | head -n 1)
-
           if [ -z "$APK" ]; then
             echo "ERROR: APK was not created."
             exit 1
           fi
+
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "ERROR: Android apksigner was not found."
+            exit 1
+          fi
+
+          echo "===== APK SIGNING CERTIFICATE ====="
+          CERT_OUTPUT=$("$APKSIGNER" verify --print-certs "$APK")
+          echo "$CERT_OUTPUT"
+
+          ACTUAL_SHA1=$(printf '%s\n' "$CERT_OUTPUT" | grep -i "SHA-1 digest:" | head -n 1 | sed 's/.*SHA-1 digest: //' | tr '[:lower:]' '[:upper:]')
+
+          if [ "$ACTUAL_SHA1" != "$EXPECTED_SHA1" ]; then
+            echo "ERROR: APK SHA-1 does not match the permanent Flappy Frog signing certificate."
+            echo "Expected: $EXPECTED_SHA1"
+            echo "Actual:   $ACTUAL_SHA1"
+            exit 1
+          fi
+
+          echo "SUCCESS: Fixed SHA-1 verified:"
+          echo "$ACTUAL_SHA1"
 
           echo "APK successfully created:"
           echo "$APK"
@@ -79,6 +123,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Flappy-Frog-FINAL-APK
+          name: Flappy-Frog-FIXED-SIGNED-APK
           path: android-build/**/build/outputs/apk/**/*.apk
           if-no-files-found: error
