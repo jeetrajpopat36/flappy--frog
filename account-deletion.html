@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flappy Frog Account Deletion</title>
+<style>
+body{font-family:Arial,sans-serif;line-height:1.6;max-width:560px;margin:auto;padding:28px 20px;color:#202124;background:#fafafa}
+.card{background:#fff;border-radius:16px;padding:22px;box-shadow:0 3px 16px rgba(0,0,0,.08)}
+h1{line-height:1.2;margin-top:0}.muted{color:#666;font-size:14px}.authInput{width:100%;height:46px;border:1px solid #c8c0ad;border-radius:10px;padding:0 12px;box-sizing:border-box;font-size:15px;margin:7px 0 12px;background:#fffdf8}.btn{width:100%;min-height:46px;border:0;border-radius:11px;background:#6b963f;color:#fff;font-weight:900;font-size:14px;margin-top:10px}.secondary{background:#394b32}.danger{background:#a33}.status{margin-top:14px;padding:12px;border-radius:10px;background:#f1f3f4;font-size:13px;white-space:pre-wrap}.hidden{display:none}.warning{padding:12px;border-radius:10px;background:#fff4d6;margin:14px 0;font-size:13px}
+</style></head><body>
+<div class="card">
+<h1>Flappy Frog Account Deletion</h1>
+<p>If you want to permanently delete your Flappy Frog account and associated cloud game data, sign in below and confirm deletion.</p>
+<div class="warning"><strong>This cannot be undone.</strong> Your Firebase account and Flappy Frog cloud profile, leaderboard data, scores, currencies and milestone data will be deleted.</div>
+
+<div id="signedOut">
+<button class="btn" id="googleBtn">CONTINUE WITH GOOGLE</button>
+<p class="muted" style="text-align:center">or use your Flappy Frog email account</p>
+<input id="email" class="authInput" type="email" autocomplete="email" placeholder="Email address">
+<input id="password" class="authInput" type="password" autocomplete="current-password" placeholder="Password">
+<button class="btn secondary" id="emailBtn">SIGN IN</button>
+</div>
+
+<div id="signedIn" class="hidden">
+<p id="accountText"></p>
+<button class="btn danger" id="deleteBtn">DELETE MY ACCOUNT</button>
+<button class="btn secondary" id="signOutBtn">SIGN OUT</button>
+</div>
+
+<div id="status" class="status hidden"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore-compat.js"></script>
+<script>
+const firebaseConfig={
+ apiKey:"AIzaSyBNUIrdE79QVLpgEhEOHbf6ZCOM2tqeSrc",
+ authDomain:"flappy-frog-3ebf0.firebaseapp.com",
+ projectId:"flappy-frog-3ebf0",
+ storageBucket:"flappy-frog-3ebf0.firebasestorage.app",
+ messagingSenderId:"834932759537",
+ appId:"1:834932759537:web:70c6377f99a0ca90bac250",
+ measurementId:"G-KKEXVDGFCH"
+};
+firebase.initializeApp(firebaseConfig);
+const auth=firebase.auth(),db=firebase.firestore();
+const signedOut=document.getElementById('signedOut'),signedIn=document.getElementById('signedIn'),statusEl=document.getElementById('status'),accountText=document.getElementById('accountText');
+function status(msg){statusEl.textContent=msg;statusEl.classList.remove('hidden')}
+function clearStatus(){statusEl.classList.add('hidden');statusEl.textContent=''}
+function err(e){const c=e&&e.code||'';const m={
+ 'auth/invalid-credential':'Incorrect email or password.',
+ 'auth/wrong-password':'Incorrect email or password.',
+ 'auth/user-not-found':'No account was found with that email.',
+ 'auth/invalid-email':'Please enter a valid email address.',
+ 'auth/popup-closed-by-user':'Google sign-in was cancelled.',
+ 'auth/popup-blocked':'Google sign-in popup was blocked. Please allow popups and try again.',
+ 'auth/network-request-failed':'Network connection failed. Check your internet connection and try again.'};return m[c]||('Could not complete the request.'+(c?' Firebase error: '+c:''))}
+function render(user){
+ if(user&&!user.isAnonymous){signedOut.classList.add('hidden');signedIn.classList.remove('hidden');accountText.textContent='Signed in as '+(user.email||user.displayName||'your Flappy Frog account')+'.';}
+ else{signedOut.classList.remove('hidden');signedIn.classList.add('hidden');}
+}
+auth.onAuthStateChanged(render);
+document.getElementById('googleBtn').onclick=async()=>{clearStatus();try{await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())}catch(e){status(err(e))}};
+document.getElementById('emailBtn').onclick=async()=>{clearStatus();const email=document.getElementById('email').value.trim(),password=document.getElementById('password').value;if(!email||!password){status('Enter your email and password.');return}try{await auth.signInWithEmailAndPassword(email,password)}catch(e){status(err(e))}};
+document.getElementById('signOutBtn').onclick=async()=>{await auth.signOut();clearStatus()};
+document.getElementById('deleteBtn').onclick=async()=>{
+ const user=auth.currentUser;if(!user||user.isAnonymous)return;
+ if(!confirm('Permanently delete your Flappy Frog account and all associated cloud game data?'))return;
+ clearStatus();status('Deleting your account…');
+ try{
+  // The fresh sign-in used on this page provides a recent authentication session.
+  await db.collection('players').doc(user.uid).delete();
+  await user.delete();
+  signedIn.classList.add('hidden');signedOut.classList.remove('hidden');
+  status('Your Flappy Frog account and associated cloud game data have been deleted.');
+ }catch(e){status(err(e)+' If the request was rejected for security reasons, sign in again on this page and retry the deletion.');}
+};
+</script></body></html>
