@@ -1,0 +1,146 @@
+name: One-time Flappy Frog revive correction
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-time-revive-correction.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-revive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+      - name: Patch only revive handling in the existing files
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile, tempfile, re, subprocess, os
+
+          index = Path("index.html")
+          html = index.read_text(encoding="utf-8")
+          old = """ },()=>{
+             if(token!==reviveToken)return;
+             reviveAdPending=false;showFirstReviveOffer();showMilestoneToast('AD UNAVAILABLE','Please try again in a moment');
+           });"""
+          new = """ },()=>{
+             // No ad was available or it failed to open: do not grant a revive.
+             if(token!==reviveToken)return;
+             reviveAdPending=false;showFirstReviveOffer();showMilestoneToast('AD UNAVAILABLE','Please try again in a moment');
+           },()=>{
+             // Closing without a reward resumes safely, but consumes this revive chance.
+             // This prevents repeated ad dismissals from granting unlimited revives.
+             // No Fly or Butterfly is spent or awarded.
+             if(token!==reviveToken||!reviveAdPending||!reviveOfferOpen)return;
+             reviveAdPending=false;reviveStage=1;resumeAfterAdDismissal();
+           });"""
+          if html.count(old) != 1:
+              raise SystemExit(f"Expected one main HTML revive callback; found {html.count(old)}")
+          index.write_text(html.replace(old, new), encoding="utf-8")
+
+          archive = Path("FlappyFrog_FIXED_SIGNING.zip")
+          html_entry = "FlappyFrog_Android_Foundation_v3/app/src/main/assets/flappy_frog.html"
+          java_entry = "FlappyFrog_Android_Foundation_v3/app/src/main/java/com/mauu/flappyfrog/MainActivity.java"
+          fd, temp_name = tempfile.mkstemp(suffix=".zip")
+          os.close(fd)
+          changed = set()
+          with zipfile.ZipFile(archive, "r") as source, zipfile.ZipFile(temp_name, "w") as target:
+              for info in source.infolist():
+                  data = source.read(info.filename)
+                  if info.filename == html_entry:
+                      h = data.decode("utf-8")
+                      old_wrapper = """ showRewarded(onReward,onUnavailable){
+            if(!this.isAvailable()){if(onUnavailable)onUnavailable();return false}
+            window.__flappyRewardEarned=()=>{try{if(onReward)onReward()}finally{window.__flappyRewardEarned=null;window.__flappyRewardUnavailable=null}};
+            window.__flappyRewardUnavailable=()=>{try{if(onUnavailable)onUnavailable()}finally{window.__flappyRewardEarned=null;window.__flappyRewardUnavailable=null}};
+            try{const shown=!!window.FlappyFrogNativeAds.showRewardedAd();if(!shown){if(onUnavailable)onUnavailable();window.__flappyRewardEarned=null;window.__flappyRewardUnavailable=null;return false}return true}catch(e){if(onUnavailable)onUnavailable();window.__flappyRewardEarned=null;window.__flappyRewardUnavailable=null;return false}
+           },"""
+                      new_wrapper = """ showRewarded(onReward,onUnavailable,onDismiss){
+            if(!this.isAvailable()){if(onUnavailable)onUnavailable();return false}
+            const clearCallbacks=()=>{window.__flappyRewardEarned=null;window.__flappyRewardUnavailable=null;window.__flappyRewardDismissed=null};
+            window.__flappyRewardEarned=()=>{try{if(onReward)onReward()}finally{clearCallbacks()}};
+            window.__flappyRewardUnavailable=()=>{try{if(onUnavailable)onUnavailable()}finally{clearCallbacks()}};
+            window.__flappyRewardDismissed=()=>{try{if(onDismiss)onDismiss()}finally{clearCallbacks()}};
+            try{const shown=!!window.FlappyFrogNativeAds.showRewardedAd();if(!shown){if(onUnavailable)onUnavailable();clearCallbacks();return false}return true}catch(e){if(onUnavailable)onUnavailable();clearCallbacks();return false}
+           },"""
+                      if h.count(old_wrapper) != 1:
+                          raise SystemExit(f"Expected one Android HTML ad wrapper; found {h.count(old_wrapper)}")
+                      h = h.replace(old_wrapper, new_wrapper)
+                      if h.count(old) != 1:
+                          raise SystemExit(f"Expected one Android HTML revive callback; found {h.count(old)}")
+                      h = h.replace(old, new)
+                      start = h.index("function resumeAfterRevive(){")
+                      end = h.index("\nfunction die()", start)
+                      safe_respawn = """function safeRespawnAfterRevive(){
+           reviveAdPending=false;hideRevive();state='playing';paused=false;pauseBtn.classList.remove('hidden');
+           // Deterministic safe corridor: no old pipes remain near the frog, and all new pipes share the spawn gap.
+           bird.x=74;bird.y=H/2;bird.vy=0;bird.rot=0;trail=[];
+           pipes=[];for(let i=0;i<4;i++)pipes.push({x:320+i*200,top:H/2-GAP/2,scored:false});
+           hint.textContent='TAP TO FLAP';
+          }
+          function resumeAfterRevive(){safeRespawnAfterRevive();sound('flap')}
+          function resumeAfterAdDismissal(){safeRespawnAfterRevive();sound('flap')}"""
+                      h = h[:start] + safe_respawn + h[end:]
+                      h = h.replace("let paused=false,reviveStage=0,reviveOfferOpen=false,reviveInvulnerableUntil=0,reviveAdPending=false,reviveToken=0;",
+                                    "let paused=false,reviveStage=0,reviveOfferOpen=false,reviveAdPending=false,reviveToken=0;")
+                      h = h.replace("function collision(){if(performance.now()<reviveInvulnerableUntil)return false;",
+                                    "function collision(){")
+                      if "reviveInvulnerableUntil" in h:
+                          raise SystemExit("Old revive-only invulnerability state remains in Android HTML")
+                      data = h.encode("utf-8")
+                      changed.add(info.filename)
+                  elif info.filename == java_entry:
+                      j = data.decode("utf-8")
+                      old_java = """@Override public void onAdDismissedFullScreenContent() {
+                                  loadRewardedAd();
+                                  callJs("window.__flappyRewardUnavailable&&window.__flappyRewardUnavailable();");
+                              }"""
+                      new_java = """@Override public void onAdDismissedFullScreenContent() {
+                                  loadRewardedAd();
+                                  callJs("window.__flappyRewardDismissed&&window.__flappyRewardDismissed();");
+                              }"""
+                      if j.count(old_java) != 1:
+                          raise SystemExit(f"Expected one Android ad-dismiss callback; found {j.count(old_java)}")
+                      data = j.replace(old_java, new_java).encode("utf-8")
+                      changed.add(info.filename)
+                  target.writestr(info, data)
+          os.replace(temp_name, archive)
+          if changed != {html_entry, java_entry}:
+              raise SystemExit(f"Unexpected Android ZIP entry changes: {changed}")
+
+          # Verify JavaScript syntax in both game HTML files.
+          for path in [index, Path(tempfile.mkstemp(suffix=".html")[1])]:
+              if path.name.endswith(".html") and path.name != "index.html":
+                  with zipfile.ZipFile(archive) as z:
+                      path.write_bytes(z.read(html_entry))
+              source = path.read_text(encoding="utf-8")
+              for n, script in enumerate(re.findall(r"<script(?:\s[^>]*)?>([\s\S]*?)</script>", source, re.I)):
+                  if not script.strip():
+                      continue
+                  check = Path(f"/tmp/flappy-inline-{path.stem}-{n}.js")
+                  check.write_text(script, encoding="utf-8")
+                  subprocess.run(["node", "--check", str(check)], check=True)
+              if path.name != "index.html":
+                  path.unlink(missing_ok=True)
+
+          with zipfile.ZipFile(archive) as z:
+              if z.testzip() is not None:
+                  raise SystemExit("Android ZIP integrity check failed")
+              embedded = z.read(html_entry).decode("utf-8")
+              java = z.read(java_entry).decode("utf-8")
+              if "resumeAfterAdDismissal(){safeRespawnAfterRevive();sound('flap')}" not in embedded:
+                  raise SystemExit("Android dismiss-respawn handler missing")
+              if "window.__flappyRewardDismissed&&window.__flappyRewardDismissed();" not in java:
+                  raise SystemExit("Android native dismiss callback missing")
+
+          subprocess.run(["git", "diff", "--check"], check=True)
+          PY
+          git rm .github/workflows/one-time-revive-correction.yml
+          git add index.html FlappyFrog_FIXED_SIGNING.zip
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Fix rewarded-ad revive dismissal handling"
+          git push origin main
