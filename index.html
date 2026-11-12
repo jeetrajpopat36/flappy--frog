@@ -403,14 +403,14 @@ function sound(type){try{if(!soundEnabled())return;
  else if(type==='point'){o.type='sine';o.frequency.setValueAtTime(880,n);o.frequency.setValueAtTime(1175,n+.07);g.gain.setValueAtTime(.045,n);g.gain.exponentialRampToValueAtTime(.001,n+.16);o.start(n);o.stop(n+.17)}
  else {o.type='sawtooth';o.frequency.setValueAtTime(190,n);o.frequency.exponentialRampToValueAtTime(70,n+.22);g.gain.setValueAtTime(.055,n);g.gain.exponentialRampToValueAtTime(.001,n+.23);o.start(n);o.stop(n+.24)}
 }catch(e){}}
-let paused=false,reviveStage=0,reviveOfferOpen=false,reviveAdPending=false,reviveToken=0;
+let paused=false,reviveAwaitingTap=false,reviveStage=0,reviveOfferOpen=false,reviveAdPending=false,reviveToken=0;
 // Physics-only tuning: preserve the existing 288x512 playfield, gap, artwork and controls.
 const SIM_MS=1000/60,GRAVITY=.25,FLAP=-4.3,BASE_SPEED=2.20,MAX_SPEED=2.35;
 function gameSpeed(){return Math.min(MAX_SPEED,BASE_SPEED+Math.min(12,Math.floor(score/10))*.0125)}
 function makePipe(x){return{x,top:78+Math.random()*185,scored:false}}
-function reset(){paused=false;reviveStage=0;reviveOfferOpen=false;reviveAdPending=false;reviveToken++;hideRevive();pauseBtn.classList.add('hidden');pauseOverlay.classList.add('hidden');score=0;bird={x:74,y:235,vy:0,rot:0};pipes=[];for(let i=0;i<4;i++)pipes.push(makePipe(320+i*200));trail=[];state='ready';acc=0;startAt=performance.now();hint.textContent='TAP TO START'}
+function reset(){paused=false;reviveAwaitingTap=false;reviveStage=0;reviveOfferOpen=false;reviveAdPending=false;reviveToken++;hideRevive();pauseBtn.classList.add('hidden');pauseOverlay.classList.add('hidden');score=0;bird={x:74,y:235,vy:0,rot:0};pipes=[];for(let i=0;i<4;i++)pipes.push(makePipe(320+i*200));trail=[];state='ready';acc=0;startAt=performance.now();hint.textContent='TAP TO START'}
 function start(){if(state!=='ready')return;state='playing';paused=false;pauseBtn.classList.remove('hidden');pauseOverlay.classList.add('hidden');bird.vy=FLAP;sound('flap');hint.textContent='TAP TO FLAP';window.FlappyFrogPlayer.queueEvent('game_start',{mode:'classic'})}
-function flap(){if(paused||reviveOfferOpen)return;if(state==='ready'){start();return}if(state==='playing'){bird.vy=FLAP;sound('flap');return}if(state==='dead'&&performance.now()-deathAt>650){reset();setTimeout(start,120)}}
+function flap(){if(paused||reviveOfferOpen)return;if(state==='ready'){start();return}if(state==='playing'){if(reviveAwaitingTap){reviveAwaitingTap=false;hint.textContent='TAP TO FLAP'}bird.vy=FLAP;sound('flap');return}if(state==='dead'&&performance.now()-deathAt>650){reset();setTimeout(start,120)}}
 function rewardText(m){const parts=[];if(m.flies)parts.push('🪰 +'+m.flies+' Fly'+(m.flies===1?'':'ies'));if(m.butterflies)parts.push('🦋 +'+m.butterflies+' Butterfly'+(m.butterflies===1?'':'ies'));return 'Score '+m.score+' • '+parts.join('  ')}
 function showMilestoneToast(title,reward){const t=document.getElementById('milestoneToast'),tt=document.getElementById('milestoneToastTitle'),tr=document.getElementById('milestoneToastReward');if(!t)return;if(window.__flappyMilestoneTimer)clearTimeout(window.__flappyMilestoneTimer);tt.textContent='🎉 '+title;tr.textContent=reward;t.classList.add('show');window.__flappyMilestoneTimer=setTimeout(()=>t.classList.remove('show'),2600)}
 function addMilestoneRewards(currentScore){const earned=[];for(const m of MILESTONES){if(currentScore>=m.score&&!milestonesClaimed.includes(m.score)){milestonesClaimed.push(m.score);flies+=m.flies;butterflies+=m.butterflies;earned.push(m)}}if(earned.length){saveCurrencies();refreshCurrencyUI();const m=earned[earned.length-1];showMilestoneToast(earned.length>1?'MILESTONES COMPLETE':'MILESTONE COMPLETE',rewardText(m));window.FlappyFrogPlayer.queueEvent('milestone_reward',{milestones:earned.map(x=>x.score),fliesEarned:earned.reduce((n,x)=>n+x.flies,0),butterfliesEarned:earned.reduce((n,x)=>n+x.butterflies,0),totalFlies:flies,totalButterflies:butterflies});if(window.FlappyFrogCloud&&window.FlappyFrogCloud.syncProfile)Promise.resolve(window.FlappyFrogCloud.syncProfile()).catch(()=>{})}return earned}
@@ -439,7 +439,7 @@ function watchReviveAd(){
  if(actions)actions.innerHTML='<div class="reviveMeta">📺 AD PLAYING…<br>Revive will start automatically after the reward.</div>';
 }
 function safeRespawnAfterRevive(){
- reviveAdPending=false;hideRevive();state='playing';paused=false;pauseBtn.classList.remove('hidden');
+ reviveAdPending=false;hideRevive();state='playing';paused=false;reviveAwaitingTap=true;pauseBtn.classList.remove('hidden');
  // Deterministic safe corridor: no old pipes remain near the frog, and all new pipes share the spawn gap.
  bird.x=74;bird.y=H/2;bird.vy=0;bird.rot=0;trail=[];
  pipes=[];for(let i=0;i<4;i++)pipes.push({x:320+i*200,top:H/2-GAP/2,scored:false});
@@ -449,7 +449,7 @@ function resumeAfterRevive(){safeRespawnAfterRevive();sound('flap')}
 function resumeAfterAdDismissal(){safeRespawnAfterRevive();sound('flap')}
 function die(){if(state!=='playing')return;if(reviveStage===0){showFirstReviveOffer();return}if(reviveStage===1){reviveStage=2;showButterflyReviveOffer();return}finishDeath()}
 function collision(){const bx=bird.x-12,by=bird.y-11,bw=24,bh=22;if(by<0||by+bh>H-GROUND)return true;for(const p of pipes)if(bx+bw>p.x&&bx<p.x+PIPE_W&&(by<p.top||by+bh>p.top+GAP))return true;return false}
-function step(){if(state!=='playing'||paused)return;const s=gameSpeed();bird.vy+=GRAVITY;bird.y+=bird.vy;bird.rot=Math.max(-.55,Math.min(1.15,bird.vy/7.8));if(Math.abs(bird.vy)<5.5){trail.unshift({x:bird.x-15,y:bird.y+2,life:1,vy:bird.vy});if(trail.length>4)trail.pop()}for(const t of trail)t.life-=.24;trail=trail.filter(t=>t.life>0);for(const p of pipes){p.x-=s;if(!p.scored&&p.x+PIPE_W<bird.x){p.scored=true;score++;sound('point');addMilestoneRewards(score)}}if(pipes[0].x+PIPE_W<0){pipes.shift();pipes.push(makePipe(pipes[pipes.length-1].x+200))}if(collision())die()}
+function step(){if(state!=='playing'||paused||reviveAwaitingTap)return;const s=gameSpeed();bird.vy+=GRAVITY;bird.y+=bird.vy;bird.rot=Math.max(-.55,Math.min(1.15,bird.vy/7.8));if(Math.abs(bird.vy)<5.5){trail.unshift({x:bird.x-15,y:bird.y+2,life:1,vy:bird.vy});if(trail.length>4)trail.pop()}for(const t of trail)t.life-=.24;trail=trail.filter(t=>t.life>0);for(const p of pipes){p.x-=s;if(!p.scored&&p.x+PIPE_W<bird.x){p.scored=true;score++;sound('point');addMilestoneRewards(score)}}if(pipes[0].x+PIPE_W<0){pipes.shift();pipes.push(makePipe(pipes[pipes.length-1].x+200))}if(collision())die()}
 function drawBg(){if(!bg.complete)return;const r=Math.max(W/bg.naturalWidth,H/bg.naturalHeight),iw=bg.naturalWidth*r,ih=bg.naturalHeight*r;ctx.drawImage(bg,(W-iw)/2,(H-ih)/2,iw,ih)}
 function img(im,x,y,w,h){if(im.complete)ctx.drawImage(im,x,y,w,h)}
 function drawPipe(p){const x=p.x,w=PIPE_W,top=p.top,bottom=p.top+GAP;img(tb,x,0,w,Math.max(1,top-20));img(tc,x,Math.max(0,top-20),w,20);img(bc,x,bottom,w,20);img(bb,x,bottom+20,w,Math.max(1,H-bottom-20))}
