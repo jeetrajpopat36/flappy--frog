@@ -45,11 +45,11 @@ jobs:
       - name: Find Android Gradle project
         run: |
           set -euo pipefail
-          mapfile -t SETTINGS_FILES < <(find android-build -type f \
-            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) -print)
+          mapfile -t SETTINGS_FILES < <(find android-build -type f \\
+            \\( -name "settings.gradle" -o -name "settings.gradle.kts" \\) -print)
           if [ "${#SETTINGS_FILES[@]}" -ne 1 ]; then
             echo "ERROR: Expected exactly one Android Gradle settings file; found ${#SETTINGS_FILES[@]}."
-            printf '%s\n' "${SETTINGS_FILES[@]}"
+            printf '%s\\n' "${SETTINGS_FILES[@]}"
             exit 1
           fi
           PROJECT_DIR="$(dirname "${SETTINGS_FILES[0]}")"
@@ -61,21 +61,21 @@ jobs:
           set -euo pipefail
           BUILD_FILE="$PROJECT_DIR/app/build.gradle.kts"
           test -f "$BUILD_FILE"
-          python3 - "$BUILD_FILE" <<'PY'
-          import pathlib, sys
-          path = pathlib.Path(sys.argv[1])
-          lines = path.read_text().splitlines()
-          values = {"versionCode": "3", "versionName": '"1.0.2"', "minSdk": "24"}
-          for key, value in values.items():
-              matches = [i for i, line in enumerate(lines) if line.strip().startswith(key + " =")]
-              if len(matches) != 1:
-                  raise SystemExit(f"ERROR: Expected exactly one {key} assignment; found {len(matches)}")
-              i = matches[0]
-              prefix = lines[i][:lines[i].index("=") + 1]
-              lines[i] = prefix + " " + value
-              print(lines[i].strip())
-          path.write_text("\n".join(lines) + "\n")
-          PY
+
+          for key in versionCode versionName minSdk; do
+            count="$(grep -Ec "^[[:space:]]*${key}[[:space:]]*=" "$BUILD_FILE" || true)"
+            if [ "$count" -ne 1 ]; then
+              echo "ERROR: Expected exactly one $key assignment; found $count."
+              exit 1
+            fi
+          done
+
+          sed -i -E 's/^([[:space:]]*versionCode[[:space:]]*=[[:space:]]*)[0-9]+/\\1 3/' "$BUILD_FILE"
+          sed -i -E 's/^([[:space:]]*versionName[[:space:]]*=[[:space:]]*).*/\\1"1.0.2"/' "$BUILD_FILE"
+          sed -i -E 's/^([[:space:]]*minSdk[[:space:]]*=[[:space:]]*)[0-9]+/\\1 24/' "$BUILD_FILE"
+
+          grep -E '^[[:space:]]*(versionCode|versionName|minSdk)[[:space:]]*=' "$BUILD_FILE"
+
       - name: Build Release AAB
         env:
           FLAPPY_KEYSTORE_PATH: ${{ github.workspace }}/android-build/flappyfrog-signing.jks
@@ -84,8 +84,8 @@ jobs:
           FLAPPY_KEY_PASSWORD: ${{ secrets.FLAPPY_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -z "${FLAPPY_KEYSTORE_PASSWORD:-}" ] || \
-             [ -z "${FLAPPY_KEY_ALIAS:-}" ] || \
+          if [ -z "${FLAPPY_KEYSTORE_PASSWORD:-}" ] || \\
+             [ -z "${FLAPPY_KEY_ALIAS:-}" ] || \\
              [ -z "${FLAPPY_KEY_PASSWORD:-}" ]; then
             echo "ERROR: One or more Flappy Frog signing secrets are missing."
             exit 1
@@ -100,264 +100,31 @@ jobs:
           mapfile -t AABS < <(find "$PROJECT_DIR" -type f -path "*/outputs/bundle/release/*.aab" -print)
           if [ "${#AABS[@]}" -ne 1 ]; then
             echo "ERROR: Expected exactly one release AAB; found ${#AABS[@]}."
-            printf '%s\n' "${AABS[@]}"
+            printf '%s\\n' "${AABS[@]}"
             exit 1
           fi
           AAB="${AABS[0]}"
           test -s "$AAB"
           echo "AAB found: $AAB"
 
-          # Fail if JAR signature verification fails; do not mask the exit status.
           if ! jarsigner -verify -certs "$AAB" > aab-signature-verification.log 2>&1; then
             cat aab-signature-verification.log
             echo "ERROR: AAB signature verification failed."
             exit 1
           fi
           cat aab-signature-verification.log
-          if ! grep -Eiq 'jar verified\.' aab-signature-verification.log; then
+          if ! grep -Eiq 'jar verified\\.' aab-signature-verification.log; then
             echo "ERROR: jarsigner did not confirm a verified AAB."
             exit 1
           fi
 
-          # keytool prints the signer certificate SHA1. An empty/unparseable value is a hard failure.
           CERT_OUTPUT="$(keytool -J-Duser.language=en -J-Duser.country=US -printcert -jarfile "$AAB" 2>&1)" || {
-            printf '%s\n' "$CERT_OUTPUT"
+            printf '%s\\n' "$CERT_OUTPUT"
             echo "ERROR: Could not extract the AAB signer certificate."
             exit 1
           }
-          printf '%s\n' "$CERT_OUTPUT"
-          ACTUAL_SHA1="$(printf '%s\n' "$CERT_OUTPUT" | awk -F': ' 'toupper($1) ~ /SHA1/ {print $2; exit}' | tr -d ' :\r' | tr '[:lower:]' '[:upper:]')"
-          EXPECTED_NORMALIZED="$(printf '%s' "$EXPECTED_SHA1" | tr -d ':' | tr '[:lower:]' '[:upper:]')"
-
-          if ! [[ "$ACTUAL_SHA1" =~ ^[0-9A-F]{40}$ ]]; then
-            echo "ERROR: Could not parse a valid 40-character SHA-1 from the AAB certificate."
-            echo "Parsed value: '$ACTUAL_SHA1'"
-            exit 1
-          fi
-          if [ "$ACTUAL_SHA1" != "$EXPECTED_NORMALIZED" ]; then
-            echo "ERROR: AAB signer does not match the permanent Flappy Frog certificate."
-            echo "Expected: $EXPECTED_NORMALIZED"
-            echo "Actual:   $ACTUAL_SHA1"
-            exit 1
-          fi
-          echo "SUCCESS: AAB signature and permanent SHA-1 both verified: $ACTUAL_SHA1"
-
-      - name: Upload Release AAB
-        uses: actions/upload-artifact@v4
-        with:
-          name: Flappy-Frog-RELEASE-AAB
-          path: android-build/**/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
-, r'\\g<1>3\\g<2>', 'versionCode'),
-              (r'(?m)^([ \\t]*versionName[ \\t]*=[ \\t]*)["\\'][^"\\']*["\\']([ \\t]*(?://.*)?)
-      - name: Build Release AAB
-        env:
-          FLAPPY_KEYSTORE_PATH: ${{ github.workspace }}/android-build/flappyfrog-signing.jks
-          FLAPPY_KEYSTORE_PASSWORD: ${{ secrets.FLAPPY_KEYSTORE_PASSWORD }}
-          FLAPPY_KEY_ALIAS: ${{ secrets.FLAPPY_KEY_ALIAS }}
-          FLAPPY_KEY_PASSWORD: ${{ secrets.FLAPPY_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [ -z "${FLAPPY_KEYSTORE_PASSWORD:-}" ] || \
-             [ -z "${FLAPPY_KEY_ALIAS:-}" ] || \
-             [ -z "${FLAPPY_KEY_PASSWORD:-}" ]; then
-            echo "ERROR: One or more Flappy Frog signing secrets are missing."
-            exit 1
-          fi
-          gradle -p "$PROJECT_DIR" bundleRelease --stacktrace
-
-      - name: Verify AAB signature and permanent SHA-1
-        env:
-          EXPECTED_SHA1: C8:21:F8:8B:20:CB:21:8B:BC:45:AE:AB:84:31:CD:22:49:74:DB:89
-        run: |
-          set -euo pipefail
-          mapfile -t AABS < <(find "$PROJECT_DIR" -type f -path "*/outputs/bundle/release/*.aab" -print)
-          if [ "${#AABS[@]}" -ne 1 ]; then
-            echo "ERROR: Expected exactly one release AAB; found ${#AABS[@]}."
-            printf '%s\n' "${AABS[@]}"
-            exit 1
-          fi
-          AAB="${AABS[0]}"
-          test -s "$AAB"
-          echo "AAB found: $AAB"
-
-          # Fail if JAR signature verification fails; do not mask the exit status.
-          if ! jarsigner -verify -certs "$AAB" > aab-signature-verification.log 2>&1; then
-            cat aab-signature-verification.log
-            echo "ERROR: AAB signature verification failed."
-            exit 1
-          fi
-          cat aab-signature-verification.log
-          if ! grep -Eiq 'jar verified\.' aab-signature-verification.log; then
-            echo "ERROR: jarsigner did not confirm a verified AAB."
-            exit 1
-          fi
-
-          # keytool prints the signer certificate SHA1. An empty/unparseable value is a hard failure.
-          CERT_OUTPUT="$(keytool -J-Duser.language=en -J-Duser.country=US -printcert -jarfile "$AAB" 2>&1)" || {
-            printf '%s\n' "$CERT_OUTPUT"
-            echo "ERROR: Could not extract the AAB signer certificate."
-            exit 1
-          }
-          printf '%s\n' "$CERT_OUTPUT"
-          ACTUAL_SHA1="$(printf '%s\n' "$CERT_OUTPUT" | awk -F': ' 'toupper($1) ~ /SHA1/ {print $2; exit}' | tr -d ' :\r' | tr '[:lower:]' '[:upper:]')"
-          EXPECTED_NORMALIZED="$(printf '%s' "$EXPECTED_SHA1" | tr -d ':' | tr '[:lower:]' '[:upper:]')"
-
-          if ! [[ "$ACTUAL_SHA1" =~ ^[0-9A-F]{40}$ ]]; then
-            echo "ERROR: Could not parse a valid 40-character SHA-1 from the AAB certificate."
-            echo "Parsed value: '$ACTUAL_SHA1'"
-            exit 1
-          fi
-          if [ "$ACTUAL_SHA1" != "$EXPECTED_NORMALIZED" ]; then
-            echo "ERROR: AAB signer does not match the permanent Flappy Frog certificate."
-            echo "Expected: $EXPECTED_NORMALIZED"
-            echo "Actual:   $ACTUAL_SHA1"
-            exit 1
-          fi
-          echo "SUCCESS: AAB signature and permanent SHA-1 both verified: $ACTUAL_SHA1"
-
-      - name: Upload Release AAB
-        uses: actions/upload-artifact@v4
-        with:
-          name: Flappy-Frog-RELEASE-AAB
-          path: android-build/**/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
-, r'\\g<1>"1.0.2"\\g<2>', 'versionName'),
-              (r'(?m)^([ \\t]*minSdk[ \\t]*=[ \\t]*)\\d+([ \\t]*(?://.*)?)
-      - name: Build Release AAB
-        env:
-          FLAPPY_KEYSTORE_PATH: ${{ github.workspace }}/android-build/flappyfrog-signing.jks
-          FLAPPY_KEYSTORE_PASSWORD: ${{ secrets.FLAPPY_KEYSTORE_PASSWORD }}
-          FLAPPY_KEY_ALIAS: ${{ secrets.FLAPPY_KEY_ALIAS }}
-          FLAPPY_KEY_PASSWORD: ${{ secrets.FLAPPY_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [ -z "${FLAPPY_KEYSTORE_PASSWORD:-}" ] || \
-             [ -z "${FLAPPY_KEY_ALIAS:-}" ] || \
-             [ -z "${FLAPPY_KEY_PASSWORD:-}" ]; then
-            echo "ERROR: One or more Flappy Frog signing secrets are missing."
-            exit 1
-          fi
-          gradle -p "$PROJECT_DIR" bundleRelease --stacktrace
-
-      - name: Verify AAB signature and permanent SHA-1
-        env:
-          EXPECTED_SHA1: C8:21:F8:8B:20:CB:21:8B:BC:45:AE:AB:84:31:CD:22:49:74:DB:89
-        run: |
-          set -euo pipefail
-          mapfile -t AABS < <(find "$PROJECT_DIR" -type f -path "*/outputs/bundle/release/*.aab" -print)
-          if [ "${#AABS[@]}" -ne 1 ]; then
-            echo "ERROR: Expected exactly one release AAB; found ${#AABS[@]}."
-            printf '%s\n' "${AABS[@]}"
-            exit 1
-          fi
-          AAB="${AABS[0]}"
-          test -s "$AAB"
-          echo "AAB found: $AAB"
-
-          # Fail if JAR signature verification fails; do not mask the exit status.
-          if ! jarsigner -verify -certs "$AAB" > aab-signature-verification.log 2>&1; then
-            cat aab-signature-verification.log
-            echo "ERROR: AAB signature verification failed."
-            exit 1
-          fi
-          cat aab-signature-verification.log
-          if ! grep -Eiq 'jar verified\.' aab-signature-verification.log; then
-            echo "ERROR: jarsigner did not confirm a verified AAB."
-            exit 1
-          fi
-
-          # keytool prints the signer certificate SHA1. An empty/unparseable value is a hard failure.
-          CERT_OUTPUT="$(keytool -J-Duser.language=en -J-Duser.country=US -printcert -jarfile "$AAB" 2>&1)" || {
-            printf '%s\n' "$CERT_OUTPUT"
-            echo "ERROR: Could not extract the AAB signer certificate."
-            exit 1
-          }
-          printf '%s\n' "$CERT_OUTPUT"
-          ACTUAL_SHA1="$(printf '%s\n' "$CERT_OUTPUT" | awk -F': ' 'toupper($1) ~ /SHA1/ {print $2; exit}' | tr -d ' :\r' | tr '[:lower:]' '[:upper:]')"
-          EXPECTED_NORMALIZED="$(printf '%s' "$EXPECTED_SHA1" | tr -d ':' | tr '[:lower:]' '[:upper:]')"
-
-          if ! [[ "$ACTUAL_SHA1" =~ ^[0-9A-F]{40}$ ]]; then
-            echo "ERROR: Could not parse a valid 40-character SHA-1 from the AAB certificate."
-            echo "Parsed value: '$ACTUAL_SHA1'"
-            exit 1
-          fi
-          if [ "$ACTUAL_SHA1" != "$EXPECTED_NORMALIZED" ]; then
-            echo "ERROR: AAB signer does not match the permanent Flappy Frog certificate."
-            echo "Expected: $EXPECTED_NORMALIZED"
-            echo "Actual:   $ACTUAL_SHA1"
-            exit 1
-          fi
-          echo "SUCCESS: AAB signature and permanent SHA-1 both verified: $ACTUAL_SHA1"
-
-      - name: Upload Release AAB
-        uses: actions/upload-artifact@v4
-        with:
-          name: Flappy-Frog-RELEASE-AAB
-          path: android-build/**/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
-, r'\\g<1>24\\g<2>', 'minSdk'),
-          ]
-          for pattern, replacement, label in rules:
-              text, count = re.subn(pattern, replacement, text, count=1)
-              if count != 1:
-                  raise SystemExit(f"ERROR: Expected exactly one {label} assignment in {path}")
-          path.write_text(text)
-          for label in ("versionCode", "versionName", "minSdk"):
-              print(next(line.strip() for line in text.splitlines() if re.match(rf"\\s*{label}\\s*=", line)))
-          PY
-
-      - name: Build Release AAB
-        env:
-          FLAPPY_KEYSTORE_PATH: ${{ github.workspace }}/android-build/flappyfrog-signing.jks
-          FLAPPY_KEYSTORE_PASSWORD: ${{ secrets.FLAPPY_KEYSTORE_PASSWORD }}
-          FLAPPY_KEY_ALIAS: ${{ secrets.FLAPPY_KEY_ALIAS }}
-          FLAPPY_KEY_PASSWORD: ${{ secrets.FLAPPY_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [ -z "${FLAPPY_KEYSTORE_PASSWORD:-}" ] || \
-             [ -z "${FLAPPY_KEY_ALIAS:-}" ] || \
-             [ -z "${FLAPPY_KEY_PASSWORD:-}" ]; then
-            echo "ERROR: One or more Flappy Frog signing secrets are missing."
-            exit 1
-          fi
-          gradle -p "$PROJECT_DIR" bundleRelease --stacktrace
-
-      - name: Verify AAB signature and permanent SHA-1
-        env:
-          EXPECTED_SHA1: C8:21:F8:8B:20:CB:21:8B:BC:45:AE:AB:84:31:CD:22:49:74:DB:89
-        run: |
-          set -euo pipefail
-          mapfile -t AABS < <(find "$PROJECT_DIR" -type f -path "*/outputs/bundle/release/*.aab" -print)
-          if [ "${#AABS[@]}" -ne 1 ]; then
-            echo "ERROR: Expected exactly one release AAB; found ${#AABS[@]}."
-            printf '%s\n' "${AABS[@]}"
-            exit 1
-          fi
-          AAB="${AABS[0]}"
-          test -s "$AAB"
-          echo "AAB found: $AAB"
-
-          # Fail if JAR signature verification fails; do not mask the exit status.
-          if ! jarsigner -verify -certs "$AAB" > aab-signature-verification.log 2>&1; then
-            cat aab-signature-verification.log
-            echo "ERROR: AAB signature verification failed."
-            exit 1
-          fi
-          cat aab-signature-verification.log
-          if ! grep -Eiq 'jar verified\.' aab-signature-verification.log; then
-            echo "ERROR: jarsigner did not confirm a verified AAB."
-            exit 1
-          fi
-
-          # keytool prints the signer certificate SHA1. An empty/unparseable value is a hard failure.
-          CERT_OUTPUT="$(keytool -J-Duser.language=en -J-Duser.country=US -printcert -jarfile "$AAB" 2>&1)" || {
-            printf '%s\n' "$CERT_OUTPUT"
-            echo "ERROR: Could not extract the AAB signer certificate."
-            exit 1
-          }
-          printf '%s\n' "$CERT_OUTPUT"
-          ACTUAL_SHA1="$(printf '%s\n' "$CERT_OUTPUT" | awk -F': ' 'toupper($1) ~ /SHA1/ {print $2; exit}' | tr -d ' :\r' | tr '[:lower:]' '[:upper:]')"
+          printf '%s\\n' "$CERT_OUTPUT"
+          ACTUAL_SHA1="$(printf '%s\\n' "$CERT_OUTPUT" | awk -F': ' 'toupper($1) ~ /SHA1/ {print $2; exit}' | tr -d ' :\\r' | tr '[:lower:]' '[:upper:]')"
           EXPECTED_NORMALIZED="$(printf '%s' "$EXPECTED_SHA1" | tr -d ':' | tr '[:lower:]' '[:upper:]')"
 
           if ! [[ "$ACTUAL_SHA1" =~ ^[0-9A-F]{40}$ ]]; then
