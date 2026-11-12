@@ -424,8 +424,15 @@ function watchReviveAd(){
    if(token!==reviveToken||!reviveAdPending||reviveOfferOpen===false)return;
    reviveAdPending=false;reviveStage=1;resumeAfterRevive();
  },()=>{
+   // No ad was available or it failed to open: do not grant a revive.
    if(token!==reviveToken)return;
    reviveAdPending=false;showFirstReviveOffer();showMilestoneToast('AD UNAVAILABLE','Please try again in a moment');
+ },()=>{
+   // Closing without a reward resumes safely, but consumes this revive chance.
+   // This prevents repeated ad dismissals from granting unlimited revives.
+   // No Fly or Butterfly is spent or awarded.
+   if(token!==reviveToken||!reviveAdPending||!reviveOfferOpen)return;
+   reviveAdPending=false;reviveStage=1;resumeAfterAdDismissal();
  });
  if(!started){reviveAdPending=false;return}
  const actions=document.getElementById('reviveActions');
