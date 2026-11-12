@@ -62,11 +62,20 @@ jobs:
           BUILD_FILE="$PROJECT_DIR/app/build.gradle.kts"
           test -f "$BUILD_FILE"
           python3 - "$BUILD_FILE" <<'PY'
-          import pathlib, re, sys
+          import pathlib, sys
           path = pathlib.Path(sys.argv[1])
-          text = path.read_text()
-          rules = [
-              (r'(?m)^([ \\t]*versionCode[ \\t]*=[ \\t]*)\\d+([ \\t]*(?://.*)?)
+          lines = path.read_text().splitlines()
+          values = {"versionCode": "3", "versionName": '"1.0.2"', "minSdk": "24"}
+          for key, value in values.items():
+              matches = [i for i, line in enumerate(lines) if line.strip().startswith(key + " =")]
+              if len(matches) != 1:
+                  raise SystemExit(f"ERROR: Expected exactly one {key} assignment; found {len(matches)}")
+              i = matches[0]
+              prefix = lines[i][:lines[i].index("=") + 1]
+              lines[i] = prefix + " " + value
+              print(lines[i].strip())
+          path.write_text("\n".join(lines) + "\n")
+          PY
       - name: Build Release AAB
         env:
           FLAPPY_KEYSTORE_PATH: ${{ github.workspace }}/android-build/flappyfrog-signing.jks
